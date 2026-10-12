@@ -1,13 +1,6 @@
 {
     "buildCommand": "npm run build",
-    "env": {
-        "VITE_BACKEND_URL": "https://shepherd-ai-backend.onrender.com"
-    },
-    "build": {
-        "env": {
-            "VITE_BACKEND_URL": "https://shepherd-ai-backend.onrender.com"
-        }
-    },
+    "outputDirectory": "dist",
     "rewrites": [
         {
             "source": "/(.*)",
