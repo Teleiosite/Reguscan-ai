@@ -26,6 +26,8 @@ import {
   Info
 } from 'lucide-react';
 
+import { DocumentViewerCanvas } from './DocumentViewerCanvas';
+
 interface DossierInspectionViewProps {
   dossier: RegulatoryDossier;
   onBack: () => void;
@@ -40,6 +42,7 @@ export const DossierInspectionView: React.FC<DossierInspectionViewProps> = ({
   const [selectedDocId, setSelectedDocId] = useState<string>(
     dossier.documents[0]?.id || ''
   );
+  const [docViewMode, setDocViewMode] = useState<'CANVAS' | 'EXTRACTED'>('CANVAS');
   const [isQueryModalOpen, setIsQueryModalOpen] = useState(false);
   const [queryLetter, setQueryLetter] = useState<QueryLetterTemplate | null>(null);
   const [officerNote, setOfficerNote] = useState('');
@@ -200,25 +203,61 @@ export const DossierInspectionView: React.FC<DossierInspectionViewProps> = ({
 
           {/* Active Document Inspection Window */}
           {selectedDoc && (
-            <div className="p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="p-4 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900">{selectedDoc.name}</h4>
                   <div className="text-[11px] text-slate-500 mt-0.5">
                     Type: <span className="font-semibold text-slate-700">{selectedDoc.docType.replace(/_/g, ' ')}</span> • Size: {selectedDoc.fileSize}
                   </div>
                 </div>
-                <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                  selectedDoc.status === 'VERIFIED'
-                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                    : 'bg-amber-100 text-amber-800 border border-amber-300'
-                }`}>
-                  {selectedDoc.status}
-                </span>
+
+                <div className="flex items-center gap-2">
+                  <div className="bg-slate-100 p-0.5 rounded-lg border border-slate-200 flex">
+                    <button
+                      onClick={() => setDocViewMode('CANVAS')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                        docViewMode === 'CANVAS'
+                          ? 'bg-white text-blue-700 shadow-2xs'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Visual Canvas (OCR)
+                    </button>
+                    <button
+                      onClick={() => setDocViewMode('EXTRACTED')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                        docViewMode === 'EXTRACTED'
+                          ? 'bg-white text-blue-700 shadow-2xs'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Extracted Data
+                    </button>
+                  </div>
+
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                    selectedDoc.status === 'VERIFIED'
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      : 'bg-amber-100 text-amber-800 border border-amber-300'
+                  }`}>
+                    {selectedDoc.status}
+                  </span>
+                </div>
               </div>
 
-              {/* Extracted Entity Summary Box */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+              {/* View 1: High-Res Scanned Regulatory Certificate Canvas with OCR bounding highlights */}
+              {docViewMode === 'CANVAS' && (
+                <DocumentViewerCanvas
+                  document={selectedDoc}
+                  productName={dossier.productName}
+                  applicantName={dossier.applicantName}
+                />
+              )}
+
+              {/* View 2: Extracted Entity Summary Box */}
+              {docViewMode === 'EXTRACTED' && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
                 <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
                   <Sparkles size={13} className="text-blue-600" />
                   <span>AI Extracted Document Metadata</span>
@@ -296,9 +335,10 @@ export const DossierInspectionView: React.FC<DossierInspectionViewProps> = ({
                   </div>
                 )}
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+      </div>
 
         {/* RIGHT PANE (Compliance Cross-Verification & Officer Decision Station) */}
         <div className="lg:col-span-5 space-y-6">

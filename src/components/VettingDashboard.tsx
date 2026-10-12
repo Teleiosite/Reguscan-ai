@@ -20,7 +20,9 @@ import {
   Award,
   Sparkles,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  UploadCloud,
+  ShieldCheck
 } from 'lucide-react';
 
 interface VettingDashboardProps {
@@ -28,13 +30,17 @@ interface VettingDashboardProps {
   onSelectDossier: (dossierId: string) => void;
   activeDirectorate: Directorate | 'ALL';
   onChangeDirectorate: (dir: Directorate | 'ALL') => void;
+  onOpenUploader?: () => void;
+  onOpenAuditTrail?: () => void;
 }
 
 export const VettingDashboard: React.FC<VettingDashboardProps> = ({
   dossiers,
   onSelectDossier,
   activeDirectorate,
-  onChangeDirectorate
+  onChangeDirectorate,
+  onOpenUploader,
+  onOpenAuditTrail
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -75,12 +81,32 @@ export const VettingDashboard: React.FC<VettingDashboardProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-800/80 border border-slate-700/60 px-4 py-2.5 rounded-xl text-right">
-            <div className="text-[11px] text-slate-400 uppercase font-semibold">Active Session</div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenUploader && (
+            <button
+              onClick={onOpenUploader}
+              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-xs transition"
+            >
+              <UploadCloud size={16} />
+              <span>+ Intake New Dossier</span>
+            </button>
+          )}
+
+          {onOpenAuditTrail && (
+            <button
+              onClick={onOpenAuditTrail}
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-2 transition"
+            >
+              <ShieldCheck size={16} className="text-emerald-400" />
+              <span>NDPA 2023 Audit Trail</span>
+            </button>
+          )}
+
+          <div className="bg-slate-800/80 border border-slate-700/60 px-4 py-2 rounded-xl text-right hidden sm:block">
+            <div className="text-[10px] text-slate-400 uppercase font-semibold">Active Session</div>
             <div className="text-xs font-bold text-blue-400 flex items-center justify-end gap-1.5 mt-0.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Pharm. Chinyere Nwosu (Chief Officer)
+              Pharm. Chinyere Nwosu (CRO)
             </div>
           </div>
         </div>

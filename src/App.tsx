@@ -4,6 +4,8 @@ import { INITIAL_DOSSIERS } from './data/initialDossiers';
 import { VettingDashboard } from './components/VettingDashboard';
 import { DossierInspectionView } from './components/DossierInspectionView';
 import { ReguScanLanding } from './components/ReguScanLanding';
+import { DossierUploader } from './components/DossierUploader';
+import { AuditTrailModal } from './components/AuditTrailModal';
 import {
   Shield,
   FileCheck2,
@@ -14,7 +16,9 @@ import {
   Search,
   ExternalLink,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  UploadCloud,
+  ShieldCheck
 } from 'lucide-react';
 
 export function App() {
@@ -22,6 +26,8 @@ export function App() {
   const [dossiers, setDossiers] = useState<RegulatoryDossier[]>(INITIAL_DOSSIERS);
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | 'ALL'>('ALL');
+  const [isUploaderOpen, setIsUploaderOpen] = useState(false);
+  const [isAuditTrailOpen, setIsAuditTrailOpen] = useState(false);
 
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId) || null;
 
@@ -65,24 +71,43 @@ export function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => setIsUploaderOpen(true)}
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 shadow-2xs transition"
+            >
+              <UploadCloud size={14} />
+              <span className="hidden sm:inline">+ Intake Dossier</span>
+              <span className="sm:hidden">+ Intake</span>
+            </button>
+
+            <button
+              onClick={() => setIsAuditTrailOpen(true)}
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition"
+            >
+              <ShieldCheck size={14} className="text-emerald-400" />
+              <span className="hidden sm:inline">Audit Trail</span>
+            </button>
+
+            <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
+
             <button
               onClick={() => setViewMode('DASHBOARD')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 viewMode === 'DASHBOARD'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  ? 'bg-slate-800 text-white border border-slate-700'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              Dossier Queue
+              Queue
             </button>
             <button
               onClick={() => setViewMode('LANDING')}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all flex items-center gap-1 border border-slate-800 hover:border-slate-700"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white transition-all border border-slate-800 hover:border-slate-700 hidden md:flex items-center gap-1"
             >
-              <span>Public Overview</span>
+              <span>Public Portal</span>
             </button>
-            <div className="h-4 w-px bg-slate-800"></div>
+            <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
             <div className="text-right hidden sm:block">
               <div className="text-xs font-bold text-slate-200">Pharm. Chinyere Nwosu</div>
               <div className="text-[10px] text-blue-400 font-medium">Chief Regulatory Officer</div>
@@ -102,6 +127,8 @@ export function App() {
             onSelectDossier={handleSelectDossier}
             activeDirectorate={activeDirectorate}
             onChangeDirectorate={setActiveDirectorate}
+            onOpenUploader={() => setIsUploaderOpen(true)}
+            onOpenAuditTrail={() => setIsAuditTrailOpen(true)}
           />
         )}
 
@@ -113,6 +140,22 @@ export function App() {
           />
         )}
       </main>
+
+      {/* Modals */}
+      {isUploaderOpen && (
+        <DossierUploader
+          onAddDossier={(newDossier) => {
+            setDossiers(prev => [newDossier, ...prev]);
+            setSelectedDossierId(newDossier.id);
+            setViewMode('INSPECTION');
+          }}
+          onClose={() => setIsUploaderOpen(false)}
+        />
+      )}
+
+      {isAuditTrailOpen && (
+        <AuditTrailModal onClose={() => setIsAuditTrailOpen(false)} />
+      )}
 
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-4 text-xs text-slate-500 text-center">

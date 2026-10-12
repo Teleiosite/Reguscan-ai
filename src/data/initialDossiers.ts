@@ -281,5 +281,46 @@ export const INITIAL_DOSSIERS: RegulatoryDossier[] = [
         suggestedAction: 'Request authenticated and apostilled Manufacturer Authorization extension letter.'
       }
     ]
+  },
+  {
+    id: 'dossier-005',
+    dossierNumber: 'NAF/DR/2026/0425',
+    directorate: 'DRUG_RR',
+    productName: 'Yoyo Bitters Herbal Cleanser Extract 200ml',
+    genericName: 'Standardized Polyherbal Botanical Tincture',
+    dosageForm: 'Oral Liquid Extract (200ml Amber Glass Bottle)',
+    applicantName: 'Abllat Healthcare Nigeria Ltd',
+    applicantRcNumber: 'RC-512903',
+    manufacturerName: 'Abllat Herbal Research Labs, Ibadan',
+    countryOfOrigin: 'Nigeria',
+    submissionDate: '2026-10-12T08:30:00.000Z',
+    priority: 'STANDARD',
+    status: 'COMPLIANT',
+    complianceScore: 94,
+    assignedOfficer: 'Pharm. Chinyere Nwosu (Chief Regulatory Officer)',
+    documents: [
+      {
+        id: 'doc-501',
+        name: 'Toxicology_And_Heavy_Metal_Screening.pdf',
+        docType: 'CERTIFICATE_OF_ANALYSIS',
+        fileSize: '3.8 MB',
+        uploadDate: '2026-10-12T08:31:00.000Z',
+        isMandatory: true,
+        status: 'VERIFIED',
+        extractedEntities: {
+          issuingAuthority: 'National Institute for Pharmaceutical Research & Development (NIPRD)',
+          issueDate: '2026-08-20',
+          expiryDate: '2028-08-19',
+          batchNumber: 'NIPRD-TOX-2026-09',
+          testedParameters: [
+            { parameter: 'Lead (Pb) Limit', result: '< 0.05 ppm', specification: 'NMT 10 ppm', status: 'PASS' },
+            { parameter: 'Cadmium (Cd) Limit', result: '< 0.01 ppm', specification: 'NMT 0.3 ppm', status: 'PASS' },
+            { parameter: 'Arsenic (As) Limit', result: '< 0.02 ppm', specification: 'NMT 4.0 ppm', status: 'PASS' },
+            { parameter: 'Acute Oral Toxicity (LD50)', result: '> 5,000 mg/kg', specification: 'Non-Toxic (> 2,000 mg/kg)', status: 'PASS' }
+          ]
+        }
+      }
+    ],
+    flags: []
   }
 ];
