@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { RegulatoryDossier, Directorate, ReguScanUser } from './types';
 import { INITIAL_DOSSIERS } from './data/initialDossiers';
 import { authService } from './services/authService';
+import { dossierService } from './services/dossierService';
+import { isSupabaseConfigured } from './services/supabase';
 import { VettingDashboard } from './components/VettingDashboard';
 import { DossierInspectionView } from './components/DossierInspectionView';
 import { ReguScanLanding } from './components/ReguScanLanding';
@@ -33,6 +35,15 @@ export function App() {
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | 'ALL'>('ALL');
   const [isAuditTrailOpen, setIsAuditTrailOpen] = useState(false);
 
+  // Load dossiers from Supabase or local cache on mount
+  useEffect(() => {
+    dossierService.fetchDossiers().then(fetched => {
+      if (fetched && fetched.length > 0) {
+        setDossiers(fetched);
+      }
+    });
+  }, []);
+
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId) || null;
 
   // Login handler
@@ -55,11 +66,13 @@ export function App() {
   // Add new dossier from either Officer or Applicant
   const handleAddNewDossier = (newDossier: RegulatoryDossier) => {
     setDossiers(prev => [newDossier, ...prev]);
+    dossierService.saveDossier(newDossier);
   };
 
   // Update existing dossier (after approval, query, or remedy submission)
   const handleUpdateDossier = (updated: RegulatoryDossier) => {
     setDossiers(prev => prev.map(d => (d.id === updated.id ? updated : d)));
+    dossierService.updateDossier(updated);
   };
 
   // Inspection navigation
@@ -239,11 +252,22 @@ export function App() {
       )}
 
       {/* Institutional Footer */}
-      <footer className="bg-white border-t border-slate-200 py-4 text-xs text-slate-500 text-center">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>
-            © 2026 ReguScan AI • Teleiocraft Solutions Limited for NAFDAC.
-          </span>
+      <footer className="bg-white border-t border-slate-200 py-4 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+          <div className="flex items-center gap-2">
+            <span>
+              © 2026 ReguScan AI • Teleiocraft Solutions Limited for NAFDAC.
+            </span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
+              isSupabaseConfigured
+                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                : 'bg-slate-100 text-slate-700 border border-slate-300'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
+              <span>{isSupabaseConfigured ? 'Supabase PostgreSQL Connected' : 'Production Persistence Engine Active'}</span>
+            </span>
+          </div>
+
           <span className="font-mono text-[11px] text-slate-400">
             Directorates: Drug R&R | Food R&R | VBM R&R (Secured under NDPA 2023)
           </span>
