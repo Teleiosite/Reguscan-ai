@@ -1,227 +1,159 @@
+import { ReguScanUser, UserRole } from '../types';
 
-import { User } from '../types';
-import { BACKEND_URL } from './env';
+const STORAGE_KEY = 'reguscan_active_session';
+const REGISTERED_USERS_KEY = 'reguscan_registered_users';
 
-const AUTH_TOKEN_KEY = 'authToken';
-const CURRENT_USER_KEY = 'currentUser';
+export const DEMO_PROFILES: ReguScanUser[] = [
+  {
+    id: 'usr-nafdac-01',
+    name: 'Pharm. Chinyere Nwosu',
+    email: 'chinyere.nwosu@nafdac.gov.ng',
+    role: 'NAFDAC_OFFICER',
+    organizationName: 'National Agency for Food & Drug Administration and Control (NAFDAC)',
+    designation: 'Chief Regulatory Officer (Drug R&R Directorate)',
+    directorate: 'DRUG_RR'
+  },
+  {
+    id: 'usr-nafdac-02',
+    name: 'Mr. Babatunde Sanusi',
+    email: 'babatunde.sanusi@nafdac.gov.ng',
+    role: 'NAFDAC_OFFICER',
+    organizationName: 'National Agency for Food & Drug Administration and Control (NAFDAC)',
+    designation: 'Chief Food Safety Inspection Officer',
+    directorate: 'FOOD_RR'
+  },
+  {
+    id: 'usr-app-01',
+    name: 'Dr. Olumide Johnson (Superintendent Pharmacist)',
+    email: 'regulatory@fidson.com',
+    role: 'APPLICANT_COMPANY',
+    organizationName: 'Fidson Healthcare PLC',
+    rcNumber: 'RC-104928',
+    designation: 'Head of Regulatory Affairs & Compliance',
+    directorate: 'DRUG_RR'
+  },
+  {
+    id: 'usr-app-02',
+    name: 'Hajia Amina Bello',
+    email: 'compliance@flourmillsng.com',
+    role: 'APPLICANT_COMPANY',
+    organizationName: 'Flour Mills of Nigeria PLC',
+    rcNumber: 'RC-023910',
+    designation: 'Quality Assurance & Regulatory Director',
+    directorate: 'FOOD_RR'
+  },
+  {
+    id: 'usr-app-03',
+    name: 'Pharm. Emeka Okoye',
+    email: 'regulatory@apexpharma.ng',
+    role: 'APPLICANT_COMPANY',
+    organizationName: 'Apex Pharmaceuticals Limited',
+    rcNumber: 'RC-384910',
+    designation: 'Regulatory Affairs Manager',
+    directorate: 'DRUG_RR'
+  }
+];
 
 export const authService = {
-  // Register a new user via backend API
-  register: async (name: string, email: string, password: string, churchName: string): Promise<{ success: boolean; message?: string }> => {
+  detectRoleFromEmail: (email: string): UserRole => {
+    const clean = email.trim().toLowerCase();
+    if (clean.endsWith('@nafdac.gov.ng') || clean.startsWith('naf') || clean.includes('nafdac')) {
+      return 'NAFDAC_OFFICER';
+    }
+    return 'APPLICANT_COMPANY';
+  },
+
+  getCurrentUser: (): ReguScanUser | null => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          full_name: name || churchName  // Use name, fallback to church name
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, message: data.detail || 'Registration failed' };
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored);
       }
+    } catch (e) {
+      console.warn('Failed to parse active user session');
+    }
+    return null;
+  },
 
-      // Store auth token
-      localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
-
-      // Store user info from response
-      if (data.user) {
-        const userInfo: User = {
-          id: data.user.id,
-          name: data.user.full_name,
-          email: data.user.email,
-          passwordHash: '',
-          organizationName: 'My Organization'  // Backend creates organization automatically
-        };
-        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(userInfo));
-      }
-
-      return { success: true };
-    } catch (error: any) {
-      return { success: false, message: error.message || 'Network error' };
+  setCurrentUser: (user: ReguScanUser | null): void => {
+    if (user) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
     }
   },
 
-  // Login existing user via backend API
-  login: async (email: string, password: string): Promise<{ success: boolean; user?: User; message?: string }> => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, message: data.detail || 'Login failed' };
-      }
-
-      // Store auth token
-      localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
-
-      // Store user info from response
-      if (data.user) {
-        const userInfo: User = {
-          id: data.user.id,
-          name: data.user.full_name,
-          email: data.user.email,
-          passwordHash: '',
-          organizationName: data.user.organization_name || 'My Organization'
-        };
-        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(userInfo));
-        return { success: true, user: userInfo };
-      }
-
-      return { success: true };
-    } catch (error: any) {
-      return { success: false, message: error.message || 'Network error' };
-    }
-  },
-
-  // Get current user from backend
-  getCurrentUser: async (): Promise<User | null> => {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (!token) return null;
-
-    // Special bypass for demo guest tokens
-    if (token === 'demo-guest-jwt-token-evaluator' || token.startsWith('demo-')) {
-      return authService.getCurrentUserSync();
+  login: async (email: string): Promise<{ success: boolean; user: ReguScanUser }> => {
+    const clean = email.trim().toLowerCase();
+    
+    // Check demo profiles
+    const matched = DEMO_PROFILES.find(p => p.email.toLowerCase() === clean);
+    if (matched) {
+      authService.setCurrentUser(matched);
+      return { success: true, user: matched };
     }
 
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (!response.ok) {
-        // Token invalid, clear it
-        localStorage.removeItem(AUTH_TOKEN_KEY);
-        localStorage.removeItem(CURRENT_USER_KEY);
-        return null;
-      }
-
-      const data = await response.json();
-
-      // Map backend user to frontend User type
-      const user: User = {
-        id: data.id,
-        name: data.full_name,
-        email: data.email,
-        passwordHash: '', // Not needed
-        organizationName: data.organization_name || 'My Organization'
-      };
-
-      return user;
-    } catch (error) {
-      return null;
+    // Check custom registered users
+    const registered = authService.getRegisteredUsers();
+    const matchedCustom = registered.find(u => u.email.toLowerCase() === clean);
+    if (matchedCustom) {
+      authService.setCurrentUser(matchedCustom);
+      return { success: true, user: matchedCustom };
     }
-  },
 
-  // Get current user from cache (synchronous)
-  getCurrentUserSync: (): User | null => {
-    const stored = localStorage.getItem(CURRENT_USER_KEY);
-    return stored ? JSON.parse(stored) : null;
-  },
+    // Dynamic fallback based on email domain
+    const role = authService.detectRoleFromEmail(clean);
+    const domainPart = clean.split('@')[1] || 'Company';
+    const orgName = role === 'NAFDAC_OFFICER'
+      ? 'NAFDAC Regulatory Affairs Directorate'
+      : `${domainPart.split('.')[0].toUpperCase()} Nigeria Limited`;
 
-  //Get auth token
-  getToken: (): string | null => {
-    return localStorage.getItem(AUTH_TOKEN_KEY);
-  },
-
-  // Check if user is authenticated
-  isAuthenticated: (): boolean => {
-    return !!localStorage.getItem(AUTH_TOKEN_KEY);
-  },
-
-  // Demo Guest Login for Evaluators & Reviewers
-  loginAsDemoGuest: (): User => {
-    const demoUser: User = {
-      id: 'demo-evaluator-001',
-      name: 'NAISH Evaluator (Demo)',
-      email: 'evaluator@naish-demo.gov.ng',
-      passwordHash: '',
-      organizationName: 'Teachers Registration Council of Nigeria (TRCN)'
+    const generatedUser: ReguScanUser = {
+      id: `usr-${Date.now()}`,
+      name: clean.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      email: clean,
+      role,
+      organizationName: orgName,
+      rcNumber: role === 'APPLICANT_COMPANY' ? `RC-${Math.floor(100000 + Math.random() * 900000)}` : undefined,
+      designation: role === 'NAFDAC_OFFICER' ? 'Regulatory Vetting Officer' : 'Authorized Representative'
     };
-    localStorage.setItem(AUTH_TOKEN_KEY, 'demo-guest-jwt-token-evaluator');
-    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(demoUser));
-    localStorage.setItem('shepherd_org_name', 'Teachers Registration Council of Nigeria (TRCN)');
-    localStorage.setItem('shepherd_business_type', 'Public Sector & Teacher Licensing');
-    localStorage.setItem('shepherd_user_plan', 'enterprise');
 
-    // Seed mock TRCN demo contacts if none exist in cache
-    const existingContacts = localStorage.getItem('shepherd_contacts_cache');
-    if (!existingContacts || existingContacts === '[]') {
-      const demoContacts = [
-        {
-          id: 'demo-c1',
-          name: 'Ahmed Bello (Primary School Educator)',
-          phone: '+2348031234567',
-          email: 'ahmed.bello@schools.gov.ng',
-          category: 'Triennial Renewal Due',
-          joinDate: '2023-04-12T10:00:00.000Z',
-          notes: 'Licence expired March 2026. Needs MCPD verification link.',
-          status: 'Active'
-        },
-        {
-          id: 'demo-c2',
-          name: 'Ngozi Okonkwo (Secondary School Teacher)',
-          phone: '+2348059876543',
-          email: 'ngozi.o@education.gov.ng',
-          category: 'Remote Enrolment',
-          joinDate: '2024-01-15T09:30:00.000Z',
-          notes: 'Enquiring on licence renewal via WhatsApp from rural LGA.',
-          status: 'Active'
-        },
-        {
-          id: 'demo-c3',
-          name: 'Babajide Adeleke (College of Education)',
-          phone: '+2348074455667',
-          email: 'b.adeleke@fce.edu.ng',
-          category: 'Active Licenced',
-          joinDate: '2024-08-20T14:15:00.000Z',
-          notes: 'Completed MCPD 15 credits. Paid via Remita.',
-          status: 'Active'
-        }
-      ];
-      localStorage.setItem('shepherd_contacts_cache', JSON.stringify(demoContacts));
-    }
-
-    return demoUser;
+    authService.setCurrentUser(generatedUser);
+    return { success: true, user: generatedUser };
   },
 
-  // Logout
-  logout: () => {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    localStorage.removeItem(CURRENT_USER_KEY);
-    window.location.reload();
+  registerCompany: async (
+    companyName: string,
+    rcNumber: string,
+    superintendentName: string,
+    email: string
+  ): Promise<{ success: boolean; user: ReguScanUser }> => {
+    const newUser: ReguScanUser = {
+      id: `usr-reg-${Date.now()}`,
+      name: superintendentName,
+      email: email.trim().toLowerCase(),
+      role: 'APPLICANT_COMPANY',
+      organizationName: companyName,
+      rcNumber: rcNumber.toUpperCase().startsWith('RC-') ? rcNumber.toUpperCase() : `RC-${rcNumber.toUpperCase()}`,
+      designation: 'Superintendent Pharmacist / Regulatory Officer'
+    };
+
+    const existing = authService.getRegisteredUsers();
+    localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify([...existing, newUser]));
+    authService.setCurrentUser(newUser);
+    return { success: true, user: newUser };
   },
 
-  // Password Recovery (backend endpoint to be implemented)
-  recoverPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
+  getRegisteredUsers: (): ReguScanUser[] => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, message: data.detail || 'Recovery request failed' };
-      }
-
-      return { success: true, message: data.message || 'Recovery email sent' };
-    } catch (error: any) {
-      return { success: false, message: error.message || 'Network error' };
+      const stored = localStorage.getItem(REGISTERED_USERS_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
     }
+  },
+
+  logout: (): void => {
+    localStorage.removeItem(STORAGE_KEY);
   }
 };

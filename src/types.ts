@@ -101,13 +101,17 @@ export interface RegulatoryDossier {
 }
 
 // User & Session Types for ReguScan AI
+export type UserRole = 'NAFDAC_OFFICER' | 'APPLICANT_COMPANY';
+
 export interface ReguScanUser {
   id: string;
   name: string;
   email: string;
-  role: 'SUPER_ADMIN' | 'VETTING_OFFICER' | 'DIRECTOR' | 'APPLICANT';
-  directorate: Directorate | 'ALL';
-  organization: string;
+  role: UserRole;
+  organizationName: string;
+  rcNumber?: string;
+  directorate?: Directorate | 'ALL';
+  designation?: string;
 }
 
 export interface QueryLetterTemplate {

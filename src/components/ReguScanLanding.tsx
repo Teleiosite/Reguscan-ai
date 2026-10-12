@@ -64,7 +64,7 @@ export const ReguScanLanding: React.FC<ReguScanLandingProps> = ({ onEnterPortal 
               onClick={onEnterPortal}
               className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5"
             >
-              <span>Launch Officer Vetting Workstation</span>
+              <span>Sign In / Enter Portal</span>
               <ArrowRight size={14} />
             </button>
           </div>
@@ -91,7 +91,7 @@ export const ReguScanLanding: React.FC<ReguScanLandingProps> = ({ onEnterPortal 
             onClick={onEnterPortal}
             className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
           >
-            <span>Open Regulatory Review Station</span>
+            <span>Access ReguScan AI Portal</span>
             <ChevronRight size={16} />
           </button>
           <a
