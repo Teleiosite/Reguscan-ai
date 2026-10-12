@@ -1,0 +1,27 @@
+services:
+  # FastAPI Backend
+  - type: web
+    name: shepherd-ai-backend
+    env: python
+    plan: free
+    buildCommand: bash build.sh
+    startCommand: cd "Agent File/backend" && gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        fromDatabase:
+          name: shepherd-ai-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+    healthCheckPath: /health
+
+databases:
+  # PostgreSQL Database
+  - name: shepherd-ai-db
+    databaseName: shepherd_ai
+    user: shepherd_ai_user
+    plan: free

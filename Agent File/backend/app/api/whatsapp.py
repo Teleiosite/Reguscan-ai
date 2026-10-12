@@ -1,0 +1,924 @@
+"""
+WhatsApp API Endpoints
+Handles WhatsApp messaging via BOTH WPPConnect bridge AND Meta Cloud API
+Routes based on user's configured delivery method
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response
+from fastapi.responses import PlainTextResponse
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+from uuid import UUID
+from sqlalchemy import text
+
+from app.dependencies import get_current_user, get_db
+from app.models import User, Message, Contact
+from app.services.whatsapp_service import get_whatsapp_service
+from app.services.meta_whatsapp_service import get_meta_whatsapp_service
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["whatsapp"])
+
+
+class WhatsAppMessageSend(BaseModel):
+    """Schema for sending WhatsApp text message"""
+    phone: str
+    message: str
+    contact_id: Optional[UUID] = None
+    whatsapp_id: Optional[str] = None
+
+
+class WhatsAppMediaSend(BaseModel):
+    """Schema for sending WhatsApp media (image/video/document)"""
+    phone: str
+    media_type: str  # 'image', 'video', or 'document'
+    media_data: str  # Base64 data (with or without data URL prefix) or URL
+    caption: str = ""
+    filename: str = ""
+    contact_id: Optional[UUID] = None
+    whatsapp_id: Optional[str] = None
+
+
+def get_organization_whatsapp_config(db: Session, org_id: UUID) -> dict:
+    """
+    Get WhatsApp configuration for organization
+    Returns delivery method and credentials
+    """
+    result = db.execute(
+        text("""
+            SELECT 
+                wppconnect_bridge_url,
+                whatsapp_phone_id,
+                whatsapp_business_account_id,
+                whatsapp_access_token
+            FROM organizations 
+            WHERE id = :org_id
+        """),
+        {"org_id": str(org_id)}
+    ).fetchone()
+    
+    if not result:
+        return {
+            "delivery_method": "wppconnect",
+            "bridge_url": "http://localhost:3001"
+        }
+    
+    # Determine delivery method based on what's configured
+    has_meta = result[1] and result[3]  # Has phone_id and access_token
+    has_wppconnect = result[0]
+    
+    if has_meta:
+        return {
+            "delivery_method": "meta",
+            "phone_number_id": result[1],
+            "access_token": result[3]
+        }
+    else:
+        return {
+            "delivery_method": "wppconnect",
+            "bridge_url": result[0] or "http://localhost:3001"
+        }
+
+
+@router.get("/status")
+async def get_whatsapp_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get WhatsApp connection status for user's organization
+    Works with both WPPConnect and Meta Cloud API
+    
+    Returns:
+        dict: {"status": "connected" | "disconnected" | "error", "provider": "wppconnect" | "meta", ...}
+    """
+    config = get_organization_whatsapp_config(db, current_user.organization_id)
+    
+    if config["delivery_method"] == "meta":
+        # Check Meta Cloud API status
+        meta_service = get_meta_whatsapp_service(
+            config["phone_number_id"],
+            config["access_token"]
+        )
+        status = await meta_service.get_status()
+    else:
+        # Check WPPConnect bridge status
+        wpp_service = get_whatsapp_service(config["bridge_url"])
+        status = await wpp_service.get_status()
+        status["provider"] = "wppconnect"
+        status["bridge_url"] = config["bridge_url"]
+    
+    logger.info(f"User {current_user.id} checked WhatsApp status: {status.get('status')} via {config['delivery_method']}")
+    
+    return status
+
+
+@router.post("/send")
+async def send_whatsapp_message(
+    message: WhatsAppMessageSend,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Send WhatsApp text message
+    Automatically routes to WPPConnect or Meta based on organization's configuration
+    
+    Args:
+        message: Message details (phone, text, optional contact_id and whatsapp_id)
+        
+    Returns:
+        dict: {"success": bool, "messageId": str (optional), "error": str (optional), "provider": str}
+    """
+    logger.info(f"User {current_user.id} sending message to {message.phone}")
+    
+    # Check plan permission
+    from app.models.organization import Organization
+    from app.api.billing import require_plan_feature
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if org:
+        require_plan_feature("whatsapp", org)
+
+    # Get organization's WhatsApp configuration
+    config = get_organization_whatsapp_config(db, current_user.organization_id)
+    
+    # Route to appropriate service
+    if config["delivery_method"] == "meta":
+        logger.info(f"Using Meta Cloud API for org {current_user.organization_id}")
+        meta_service = get_meta_whatsapp_service(
+            config["phone_number_id"],
+            config["access_token"]
+        )
+        result = await meta_service.send_message(
+            to_phone=message.phone,
+            message=message.message
+        )
+        
+        # Only log to database on SUCCESS — failed sends are shown via optimistic UI only.
+        # Logging failures creates DB records that the 5-second poller would pull back
+        # as new messages, duplicating the already-visible failed bubble.
+        if message.contact_id and result.get("success"):
+            try:
+                msg_log = Message(
+                    organization_id=current_user.organization_id,
+                    contact_id=message.contact_id,
+                    content=message.message,
+                    type="Outbound",
+                    status="Sent",
+                    sent_at=datetime.now(),
+                    whatsapp_message_id=result.get("messageId"),
+                    created_by=current_user.id
+                )
+                db.add(msg_log)
+                db.commit()
+                logger.info(f"Message logged to database: {msg_log.id}")
+                # Return the DB record ID so frontend can reconcile its optimistic message
+                result["db_message_id"] = str(msg_log.id)
+            except Exception as e:
+                logger.error(f"Error logging message to database: {str(e)}")
+                db.rollback()
+        
+        return result
+        
+    else:
+        # WPPConnect: Queue message for bridge to poll and send
+        logger.info(f"Queuing message for bridge polling")
+        
+        # Validate contact_id is provided
+        if not message.contact_id:
+            return {
+                "success": False,
+                "error": "contact_id is required for queuing messages",
+                "provider": "wppconnect"
+            }
+        
+        # Create pending message in database
+        msg_log = Message(
+            organization_id=current_user.organization_id,
+            contact_id=message.contact_id,
+            content=message.message,
+            type="Outbound",
+            status="Pending",  # Bridge will poll and send this
+            created_by=current_user.id
+        )
+        db.add(msg_log)
+        db.commit()
+        logger.info(f"Message queued: {msg_log.id}")
+        
+        return {
+            "success": True,
+            "messageId": str(msg_log.id),
+            "status": "queued",
+            "provider": "wppconnect"
+        }
+
+
+@router.post("/send-media")
+async def send_whatsapp_media(
+    media: WhatsAppMediaSend,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Send WhatsApp media (image/video/document)
+    Automatically routes to WPPConnect or Meta based on organization's configuration
+    
+    Args:
+        media: Media details (phone, type, data, caption, filename, optional contact_id/whatsapp_id)
+        
+    Returns:
+        dict: {"success": bool, "messageId": str (optional), "error": str (optional), "provider": str}
+    """
+    logger.info(f"User {current_user.id} sending {media.media_type} to {media.phone}")
+    
+    # Check plan permission
+    from app.models.organization import Organization
+    from app.api.billing import require_plan_feature
+    org = db.query(Organization).filter(Organization.id == current_user.organization_id).first()
+    if org:
+        require_plan_feature("whatsapp", org)
+
+    # Get organization's WhatsApp configuration
+    config = get_organization_whatsapp_config(db, current_user.organization_id)
+    
+    # Route to appropriate service
+    if config["delivery_method"] == "meta":
+        logger.info(f"Using Meta Cloud API for media send")
+        meta_service = get_meta_whatsapp_service(
+            config["phone_number_id"],
+            config["access_token"]
+        )
+        result = await meta_service.send_media(
+            to_phone=media.phone,
+            media_type=media.media_type,
+            media_data=media.media_data,
+            caption=media.caption,
+            filename=media.filename
+        )
+        
+        # Only log to database on SUCCESS — failed sends are shown via optimistic UI only.
+        # Logging failures creates DB records that the 5-second poller would pull back
+        # as new messages, duplicating the already-visible failed bubble.
+        if media.contact_id and result.get("success"):
+            try:
+                media_reference = media.media_data[:100] + "..." if len(media.media_data) > 100 else media.media_data
+                
+                msg_log = Message(
+                    organization_id=current_user.organization_id,
+                    contact_id=media.contact_id,
+                    content=media.caption or f"[{media.media_type}]",
+                    type="Outbound",
+                    status="Sent",
+                    attachment_type=media.media_type,
+                    attachment_url=media_reference,
+                    sent_at=datetime.now(),
+                    whatsapp_message_id=result.get("messageId"),
+                    created_by=current_user.id
+                )
+                db.add(msg_log)
+                db.commit()
+                logger.info(f"Media message logged to database: {msg_log.id}")
+                # Return the DB record ID so frontend can reconcile its optimistic message
+                result["db_message_id"] = str(msg_log.id)
+            except Exception as e:
+                logger.error(f"Error logging media message to database: {str(e)}")
+                db.rollback()
+        
+        return result
+        
+    else:
+        # WPPConnect: Queue media message for bridge to poll and send
+        logger.info(f"Queuing media message for bridge polling")
+        
+        # Validate contact_id is provided
+        if not media.contact_id:
+            return {
+                "success": False,
+                "error": "contact_id is required for queuing messages",
+                "provider": "wppconnect"
+            }
+        
+        # Create pending media message in database
+        msg_log = Message(
+            organization_id=current_user.organization_id,
+            contact_id=media.contact_id,
+            content=media.caption or f"[{media.media_type}]",
+            type="Outbound",
+            status="Pending",  # Bridge will poll and send this
+            attachment_type=media.media_type,
+            attachment_url=media.media_data,  # Full data URL for bridge to send
+            created_by=current_user.id
+        )
+        db.add(msg_log)
+        db.commit()
+        logger.info(f"Media message queued: {msg_log.id}")
+        
+        return {
+            "success": True,
+            "messageId": str(msg_log.id),
+            "status": "queued",
+            "provider": "wppconnect"
+        }
+
+
+@router.get("/webhook")
+async def verify_whatsapp_webhook(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Webhook verification endpoint for Meta WhatsApp Cloud API
+    """
+    params = request.query_params
+    mode = params.get("hub.mode")
+    token = params.get("hub.verify_token")
+    challenge = params.get("hub.challenge")
+    
+    from app.config import settings
+    expected_token = settings.whatsapp_verify_token
+    
+    if mode and token:
+        if mode == "subscribe" and token == expected_token:
+            logger.info("✅ Meta Webhook verified successfully!")
+            return PlainTextResponse(content=challenge)
+        else:
+            logger.warning("❌ Meta Webhook verification failed: token mismatch")
+            raise HTTPException(status_code=403, detail="Verification token mismatch")
+            
+    return {"status": "ok"}
+
+
+async def _deliver_resilient_whatsapp_fallback(
+    contact_id: UUID,
+    content: str,
+    org_id: UUID,
+    db: Session
+):
+    """
+    Guarantees that WhatsApp customer NEVER gets left on read.
+    If LLM times out or encounters temporary upstream issues,
+    this sends a relevant catalog response or friendly acknowledgement.
+    """
+    try:
+        from app.models.contact import Contact
+        from app.models.organization import Organization
+        from app.models.chat import Message
+        from app.models.catalog_item import CatalogItem
+        from app.api.whatsapp import get_organization_whatsapp_config
+        from app.services.meta_whatsapp_service import get_meta_whatsapp_service
+        import re, html
+
+        contact = db.query(Contact).filter(Contact.id == contact_id).first()
+        org = db.query(Organization).filter(Organization.id == org_id).first()
+        if not contact or not org or not contact.phone:
+            return
+
+        config = get_organization_whatsapp_config(db, org_id)
+        if config.get("delivery_method") != "meta" or not config.get("phone_number_id") or not config.get("access_token"):
+            return
+
+        words = [w for w in re.findall(r"\w+", content.lower()) if len(w) >= 3 and w not in {"the", "and", "need", "want", "have", "some", "like", "you", "for", "are", "there", "can", "please"}]
+        matched_items = []
+        if words:
+            all_ci = db.query(CatalogItem).filter(
+                CatalogItem.organization_id == org_id,
+                CatalogItem.is_available == True
+            ).all()
+            for ci in all_ci:
+                t_low = (ci.title or "").lower()
+                c_low = (ci.category or "").lower()
+                if any(w in t_low or w in c_low for w in words):
+                    matched_items.append(ci)
+
+        org_name = org.name or "our store"
+        ai_name = org.ai_name or "Assistant"
+        if matched_items:
+            lines = []
+            for item in matched_items[:3]:
+                title = html.unescape(item.title or "").strip()
+                price = f"{item.price_currency or 'NGN'} {item.price_amount:,.0f}".strip() if item.price_amount else "Contact for price"
+                order_url = item.action_url or f"https://decehub.com/?s={title}"
+                lines.append(f"*{title}*\nPrice: {price}\nOrder: {order_url}")
+            fallback_text = f"Hello! We have several options in stock for you at {org_name}:\n\n" + "\n\n".join(lines) + "\n\nWhich of these would you prefer?"
+        else:
+            fallback_text = f"Hello! Welcome to {org_name}. I am {ai_name}, your sales assistant. How can I help you with our products and services today?"
+
+        meta_svc = get_meta_whatsapp_service(config["phone_number_id"], config["access_token"])
+        send_res = await meta_svc.send_message(to_phone=contact.phone, message=fallback_text)
+
+        out_msg = Message(
+            organization_id=org_id,
+            contact_id=contact.id,
+            content=fallback_text,
+            type="Outbound",
+            status="Sent" if send_res.get("success") else "Failed",
+            sent_at=datetime.utcnow(),
+            whatsapp_message_id=send_res.get("messageId")
+        )
+        db.add(out_msg)
+        contact.updated_at = datetime.utcnow()
+        db.commit()
+        logger.info(f"🛡️ Resilient fallback delivered to {contact.phone} on WhatsApp")
+    except Exception as e:
+        logger.warning(f"Error in _deliver_resilient_whatsapp_fallback: {e}")
+
+
+async def _async_trigger_reply(
+    contact_id: UUID,
+    content: str,
+    org_id: UUID,
+    audio_media_id: Optional[str] = None,
+    audio_mime_type: str = "audio/ogg",
+    whatsapp_message_id: Optional[str] = None
+):
+    """Background task to run AI agent auto-reply so Meta webhook responds immediately."""
+    from app.database import SessionLocal
+    from app.services.agent_service import trigger_ai_agent_reply
+    db_bg = SessionLocal()
+    try:
+        # Show "typing..." indicator concurrently on WhatsApp so AI agent starts processing immediately
+        if whatsapp_message_id:
+            try:
+                from app.api.whatsapp import get_organization_whatsapp_config
+                from app.services.meta_whatsapp_service import get_meta_whatsapp_service
+                cfg = get_organization_whatsapp_config(db_bg, org_id)
+                if cfg.get("delivery_method") == "meta" and cfg.get("phone_number_id") and cfg.get("access_token"):
+                    meta_svc = get_meta_whatsapp_service(cfg["phone_number_id"], cfg["access_token"])
+                    import asyncio
+                    asyncio.create_task(meta_svc.send_typing_indicator(whatsapp_message_id))
+            except Exception as t_err:
+                logger.warning(f"Could not trigger WhatsApp typing indicator: {t_err}")
+
+        logger.info(f"⚡ [ASYNC BG] Launching AI auto-reply for contact {contact_id} (org {org_id})...")
+        res = await trigger_ai_agent_reply(
+            contact_id=contact_id,
+            incoming_text=content,
+            org_id=org_id,
+            db=db_bg,
+            audio_media_id=audio_media_id,
+            audio_mime_type=audio_mime_type
+        )
+        if isinstance(res, dict) and "error" in res:
+            logger.error(f"❌ [ASYNC BG] AI auto-reply error: {res}")
+            err_str = str(res.get("error", ""))
+            if "disabled" not in err_str.lower() and "paused" not in err_str.lower() and "quota" not in err_str.lower():
+                await _deliver_resilient_whatsapp_fallback(contact_id, content, org_id, db_bg)
+        else:
+            logger.info(f"✅ [ASYNC BG] AI auto-reply completed: {res}")
+    except Exception as agent_err:
+        logger.error(f"❌ [ASYNC BG] Exception in background AI auto-reply: {agent_err}", exc_info=True)
+        try:
+            await _deliver_resilient_whatsapp_fallback(contact_id, content, org_id, db_bg)
+        except Exception as fb_err:
+            logger.error(f"Failed to deliver resilient fallback: {fb_err}")
+    finally:
+        db_bg.close()
+
+
+async def process_received_message(
+    phone: str,
+    whatsapp_id: str,
+    content: str,
+    contact_name: Optional[str] = None,
+    pushname: Optional[str] = None,
+    has_media: Optional[bool] = False,
+    media_type: Optional[str] = None,
+    media_url: Optional[str] = None,
+    db: Session = None,
+    org_id: Optional[UUID] = None,
+    allowed_org_ids: Optional[list] = None,
+    audio_media_id: Optional[str] = None,
+    audio_mime_type: str = "audio/ogg",
+    whatsapp_message_id: Optional[str] = None
+):
+    # Deduplication check: ignore if this exact WhatsApp message ID was already received
+    if whatsapp_message_id:
+        existing_msg = db.query(Message).filter(
+            Message.whatsapp_message_id == whatsapp_message_id
+        ).first()
+        if existing_msg:
+            logger.info(f"⏭️ Skipping duplicate WhatsApp message {whatsapp_message_id} (already processed)")
+            return existing_msg.contact_id, existing_msg.id
+
+    # Clean phone number
+    clean_phone = phone.replace('+', '').replace(' ', '').replace('-', '')
+    
+    # Find contact - search within resolved org first if known, then fall back globally
+    contact = None
+    if org_id:
+        contact = db.query(Contact).filter(
+            Contact.organization_id == org_id,
+            (Contact.whatsapp_id == whatsapp_id) | 
+            (Contact.phone == clean_phone) | 
+            (Contact.phone == "+" + clean_phone)
+        ).order_by(Contact.created_at.desc()).first()
+
+    if not contact:
+        contact = db.query(Contact).filter(
+            (Contact.whatsapp_id == whatsapp_id) | 
+            (Contact.phone == clean_phone) | 
+            (Contact.phone == "+" + clean_phone)
+        ).order_by(Contact.created_at.desc()).first()
+
+    if contact:
+        # Route strictly to the organization that owns this contact
+        org_id = contact.organization_id
+        contact.updated_at = datetime.utcnow()
+        logger.info(f"👤 Found existing contact {contact.name} in organization {contact.organization_id}")
+    else:
+        # 2. For a brand new contact, route to the primary active organization
+        # (the one with active users and existing contacts, e.g. Seye's workspace)
+        primary_org_row = db.execute(text("""
+            SELECT o.id 
+            FROM organizations o
+            LEFT JOIN contacts c ON c.organization_id = o.id
+            WHERE (o.whatsapp_access_token IS NOT NULL AND o.whatsapp_access_token != '') 
+               OR (o.ai_api_key IS NOT NULL AND o.ai_api_key != '')
+            GROUP BY o.id
+            ORDER BY COUNT(c.id) DESC, o.created_at DESC
+            LIMIT 1
+        """)).fetchone()
+        
+        if primary_org_row:
+            org_id = primary_org_row[0]
+        elif allowed_org_ids:
+            org_id = allowed_org_ids[0]
+        elif not org_id:
+            fallback_row = db.execute(text("SELECT id FROM organizations ORDER BY created_at DESC LIMIT 1")).fetchone()
+            if fallback_row:
+                org_id = fallback_row[0]
+            
+    if not contact:
+        display_name = pushname or contact_name or f"WhatsApp {clean_phone}"
+        logger.info(f"📝 Creating new contact: {display_name} ({clean_phone}) in organization {org_id}")
+        contact = Contact(
+            organization_id=org_id,
+            name=display_name,
+            phone=clean_phone if clean_phone.startswith('+') else "+" + clean_phone,
+            whatsapp_id=whatsapp_id,
+            category="New Convert",
+            join_date=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+            notes=f"Auto-created from incoming message on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+        )
+        db.add(contact)
+        db.flush()
+    else:
+        # Update existing contact missing whatsapp_id or name
+        if whatsapp_id and not contact.whatsapp_id:
+            contact.whatsapp_id = whatsapp_id
+        if pushname and not contact.name:
+            contact.name = pushname
+        contact.updated_at = datetime.utcnow()
+
+    message_data = {
+        "organization_id": org_id,
+        "contact_id": contact.id,
+        "type": "Inbound",
+        "content": content,
+        "status": "Received",
+        "whatsapp_message_id": whatsapp_message_id,
+        "sent_at": datetime.utcnow(),
+        "created_at": datetime.utcnow()
+    }
+    
+    message = Message(**message_data)
+    
+    if has_media and media_url:
+        message.attachment_url = media_url
+        message.attachment_type = media_type
+        
+    db.add(message)
+    contact.updated_at = datetime.utcnow()
+    db.commit()
+    logger.info(f"✅ Incoming message saved for contact {contact.name} (ID: {contact.id}) in organization {org_id}")
+
+    # Trigger 24/7 Cloud AI Agent auto-reply in background as async task
+    # so Meta Webhook immediately gets HTTP 200 and never retries in a loop
+    import asyncio
+    asyncio.create_task(
+        _async_trigger_reply(
+            contact_id=contact.id,
+            content=content,
+            org_id=org_id,
+            audio_media_id=audio_media_id,
+            audio_mime_type=audio_mime_type,
+            whatsapp_message_id=whatsapp_message_id
+        )
+    )
+
+    return contact.id, message.id
+
+
+
+@router.post("/webhook")
+async def whatsapp_incoming_webhook(
+    request: Request,
+    phone: Optional[str] = None,
+    whatsapp_id: Optional[str] = None,
+    content: Optional[str] = None,
+    contact_name: Optional[str] = None,
+    pushname: Optional[str] = None,
+    has_media: Optional[bool] = False,
+    media_type: Optional[str] = None,
+    media_url: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Unified Webhook for incoming WhatsApp messages
+    Supports both WPPConnect format and official Meta JSON payload
+    """
+    try:
+        raw_body = await request.body()
+        body = {}
+        if raw_body:
+            import json
+            try:
+                body = json.loads(raw_body.decode('utf-8'))
+            except Exception:
+                pass
+
+        if body and "object" in body and body.get("object") == "whatsapp_business_account":
+            # Verify Meta webhook HMAC signature if secret configured
+            from app.config import settings
+            if settings.meta_app_secret and settings.meta_app_secret.strip():
+                import hmac
+                import hashlib
+                signature_header = request.headers.get("X-Hub-Signature-256", "")
+                if not signature_header or not signature_header.startswith("sha256="):
+                    logger.warning("Rejected Meta webhook: missing or invalid X-Hub-Signature-256 header")
+                    raise HTTPException(status_code=401, detail="Invalid signature header")
+                received_sig = signature_header.split("sha256=")[1]
+                expected_sig = hmac.new(
+                    settings.meta_app_secret.strip().encode("utf-8"),
+                    raw_body,
+                    hashlib.sha256
+                ).hexdigest()
+                if not hmac.compare_digest(expected_sig, received_sig):
+                    logger.warning("Rejected Meta webhook: signature mismatch")
+                    raise HTTPException(status_code=401, detail="Signature mismatch")
+
+            logger.info("📩 Processing incoming message from Meta Webhook")
+            entries = body.get("entry", [])
+            contact_id_str = ""
+            message_id_str = ""
+            for entry in entries:
+                changes = entry.get("changes", [])
+                for change in changes:
+                    value = change.get("value", {})
+                    if "messages" in value:
+                        messages = value.get("messages", [])
+                        contacts_list = value.get("contacts", [])
+                        metadata = value.get("metadata", {})
+                        phone_number_id = metadata.get("phone_number_id")
+                        
+                        # Find organization by phone_number_id with graceful fallbacks
+                        org_id = None
+                        allowed_org_ids = None
+                        org_row_data = None
+                        if phone_number_id:
+                            clean_pid = str(phone_number_id).strip()
+                            org_rows = db.execute(
+                                text("""
+                                    SELECT o.id, o.ai_api_key, o.whatsapp_access_token, o.ai_provider, o.ai_base_url 
+                                    FROM organizations o
+                                    LEFT JOIN contacts c ON c.organization_id = o.id
+                                    WHERE o.whatsapp_phone_id = :phone_id
+                                    GROUP BY o.id
+                                    ORDER BY COUNT(c.id) DESC, o.created_at DESC
+                                """),
+                                {"phone_id": clean_pid}
+                            ).fetchall()
+                            if org_rows:
+                                allowed_org_ids = [row[0] for row in org_rows]
+                                org_id = allowed_org_ids[0]
+                                org_row_data = org_rows[0]
+
+                        if not org_row_data:
+                            # Fallback: query organization with configured WhatsApp token or AI key
+                            fallback_rows = db.execute(
+                                text("""
+                                    SELECT id, ai_api_key, whatsapp_access_token, ai_provider, ai_base_url 
+                                    FROM organizations 
+                                    WHERE (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') 
+                                       OR (ai_api_key IS NOT NULL AND ai_api_key != '')
+                                    ORDER BY CASE 
+                                        WHEN (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') 
+                                         AND (ai_api_key IS NOT NULL AND ai_api_key != '') THEN 1
+                                        WHEN (whatsapp_access_token IS NOT NULL AND whatsapp_access_token != '') THEN 2
+                                        ELSE 3
+                                    END, id ASC 
+                                    LIMIT 1
+                                """)
+                            ).fetchall()
+                            if fallback_rows:
+                                allowed_org_ids = [row[0] for row in fallback_rows]
+                                org_id = allowed_org_ids[0]
+                                org_row_data = fallback_rows[0]
+                        
+                        sender_name = "WhatsApp User"
+                        if contacts_list:
+                            sender_name = contacts_list[0].get("profile", {}).get("name", "WhatsApp User")
+                            
+                        for msg in messages:
+                            sender_phone = msg.get("from")
+                            msg_id = msg.get("id")
+                            msg_type = msg.get("type")
+                            
+                            msg_content = ""
+                            msg_has_media = False
+                            msg_media_type = None
+                            msg_media_url = None
+                            msg_audio_media_id = None
+                            msg_audio_mime = "audio/ogg"
+                            
+                            if msg_type == "text":
+                                msg_content = msg.get("text", {}).get("body", "")
+                            elif msg_type in ["audio", "voice"]:
+                                media_obj = msg.get(msg_type, {})
+                                media_id = media_obj.get("id")
+                                msg_has_media = True
+                                msg_media_type = "audio"
+                                msg_media_url = f"meta_media_id:{media_id}"
+                                msg_content = "[Voice message]"
+                                msg_audio_media_id = media_id  # pass to agent for transcription
+                                logger.info(f"🎙️ Voice note received, media_id={media_id} — will transcribe in agent")
+
+                            elif msg_type in ["image", "video", "document", "sticker"]:
+                                media_obj = msg.get(msg_type, {})
+                                media_id = media_obj.get("id")
+                                caption = media_obj.get("caption") or media_obj.get("filename") or f"[{msg_type}]"
+                                msg_content = caption
+                                if media_id:
+                                    msg_has_media = True
+                                    msg_media_type = msg_type
+                                    msg_media_url = f"meta_media_id:{media_id}"
+                            else:
+                                msg_content = f"[{msg_type} message]"
+                                
+                            c_id, m_id = await process_received_message(
+                                phone=sender_phone,
+                                whatsapp_id=sender_phone + "@c.us",
+                                content=msg_content,
+                                contact_name=sender_name,
+                                pushname=sender_name,
+                                has_media=msg_has_media,
+                                media_type=msg_media_type,
+                                media_url=msg_media_url,
+                                db=db,
+                                org_id=org_id,
+                                audio_media_id=msg_audio_media_id,
+                                audio_mime_type=msg_audio_mime,
+                                whatsapp_message_id=msg_id
+                            )
+                            contact_id_str = str(c_id)
+                            message_id_str = str(m_id)
+            return {
+                "success": True, 
+                "message": "Message received and processed from Meta",
+                "contact_id": contact_id_str,
+                "message_id": message_id_str
+            }
+
+        # SEC-05: Bridge / WPPConnect Authentication Verification
+        bridge_secret = (
+            request.headers.get("X-Bridge-Secret")
+            or request.headers.get("X-Admin-Key")
+            or request.query_params.get("secret")
+            or body.get("bridge_secret")
+            or body.get("connection_code")
+        )
+        is_authenticated_bridge = False
+        from app.config import settings
+        from app.utils.security_utils import find_user_by_connection_code
+
+        if bridge_secret:
+            clean_secret = str(bridge_secret).strip()
+            if settings.secret_key and clean_secret == settings.secret_key.strip():
+                is_authenticated_bridge = True
+            elif settings.whatsapp_verify_token and clean_secret == settings.whatsapp_verify_token.strip():
+                is_authenticated_bridge = True
+            else:
+                b_user = find_user_by_connection_code(clean_secret, db)
+                if b_user:
+                    is_authenticated_bridge = True
+
+        if bridge_secret and not is_authenticated_bridge:
+            logger.warning("Rejected bridge webhook: invalid bridge secret or connection code")
+            raise HTTPException(status_code=401, detail="Invalid bridge authentication credentials")
+
+        final_phone = phone or body.get("phone")
+        final_whatsapp_id = whatsapp_id or body.get("whatsapp_id")
+        final_content = content or body.get("content")
+        final_contact_name = contact_name or body.get("contact_name")
+        final_pushname = pushname or body.get("pushname")
+        final_has_media = has_media or body.get("has_media", False)
+        final_media_type = media_type or body.get("media_type")
+        final_media_url = media_url or body.get("media_url")
+        
+        if not final_phone:
+            logger.warning("⚠️ Webhook received empty phone parameter")
+            return {"status": "ignored", "reason": "empty phone"}
+            
+        body_msg_id = body.get("id") or body.get("message_id")
+        c_id, m_id = await process_received_message(
+            phone=final_phone,
+            whatsapp_id=final_whatsapp_id or (final_phone + "@c.us"),
+            content=final_content or "",
+            contact_name=final_contact_name,
+            pushname=final_pushname,
+            has_media=final_has_media,
+            media_type=final_media_type,
+            media_url=final_media_url,
+            db=db,
+            whatsapp_message_id=body_msg_id
+        )
+        return {
+            "success": True, 
+            "message": "Message received and saved from bridge",
+            "contact_id": str(c_id),
+            "message_id": str(m_id)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in webhook: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/media/{media_id}")
+async def get_whatsapp_media(
+    media_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve and proxy media from Meta WhatsApp API.
+    Resolves the organization access token by looking up the media ID in messages.
+    """
+    logger.info(f"Request to retrieve Meta media ID: {media_id}")
+    
+    # 1. Find the message in the database that references this media ID
+    # Look for meta_media_id:{media_id} in messages table
+    search_str = f"meta_media_id:{media_id}"
+    msg = db.execute(
+        text("SELECT organization_id FROM messages WHERE attachment_url = :url LIMIT 1"),
+        {"url": search_str}
+    ).fetchone()
+    
+    if not msg:
+        logger.warning(f"Media ID {media_id} not found in any message record")
+        raise HTTPException(status_code=404, detail="Media not found")
+        
+    org_id = msg[0]
+    
+    # 2. Get the WhatsApp access token for this organization
+    config = get_organization_whatsapp_config(db, org_id)
+    if config.get("delivery_method") != "meta":
+        logger.warning(f"Organization {org_id} is not configured for Meta Cloud API")
+        raise HTTPException(status_code=400, detail="Meta Cloud API is not configured for this organization")
+        
+    access_token = config.get("access_token")
+    if not access_token:
+        logger.warning(f"No access token found for organization {org_id}")
+        raise HTTPException(status_code=401, detail="Meta Access Token missing")
+        
+    # 3. Request the media metadata from Meta
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            meta_url = f"https://graph.facebook.com/v18.0/{media_id}"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            res = await client.get(meta_url, headers=headers)
+            if res.status_code != 200:
+                logger.error(f"Meta media info request failed with status {res.status_code}: {res.text}")
+                raise HTTPException(status_code=res.status_code, detail="Failed to fetch media metadata from Meta")
+                
+            media_info = res.json()
+            download_url = media_info.get("url")
+            mime_type = media_info.get("mime_type", "application/octet-stream")
+            
+            if not download_url:
+                logger.error("Meta media info response did not contain a download URL")
+                raise HTTPException(status_code=500, detail="Meta API did not return download URL")
+                
+            # 4. Download the actual binary file from Meta
+            file_res = await client.get(download_url, headers=headers)
+            if file_res.status_code != 200:
+                logger.error(f"Meta media download request failed with status {file_res.status_code}")
+                raise HTTPException(status_code=file_res.status_code, detail="Failed to download file content from Meta")
+                
+            # 5. Return the file content with the correct mime type
+            return Response(content=file_res.content, media_type=mime_type)
+            
+    except httpx.TimeoutException:
+        logger.error("Timeout connecting to Meta WhatsApp API for media download")
+        raise HTTPException(status_code=504, detail="Timeout downloading media from Meta")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error proxying media: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

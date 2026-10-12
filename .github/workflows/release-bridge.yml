@@ -1,0 +1,88 @@
+name: Build and Release Bridge App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Python (for native modules)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: ./shepherd-bridge-app
+        run: |
+          npm install --legacy-peer-deps
+        continue-on-error: false
+
+      - name: Build Windows App
+        working-directory: ./shepherd-bridge-app
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List dist folder
+        working-directory: ./shepherd-bridge-app
+        run: dir dist
+
+      - name: Find .exe file
+        id: find-exe
+        working-directory: ./shepherd-bridge-app/dist
+        run: |
+          $exeFile = Get-ChildItem -Filter "*.exe" | Select-Object -First 1
+          echo "EXE_NAME=$($exeFile.Name)" >> $env:GITHUB_OUTPUT
+          echo "Found: $($exeFile.Name)"
+
+      - name: Get version
+        id: version
+        working-directory: ./shepherd-bridge-app
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Shepherd AI Bridge v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          body: |
+            ## Shepherd AI WhatsApp Bridge v${{ steps.version.outputs.VERSION }}
+            
+            ### Installation
+            1. Download `Shepherd-AI-Bridge-Setup.exe`
+            2. Run the installer
+            3. Launch the app and enter your connection code
+            4. Scan WhatsApp QR code
+            
+            ### Features
+            - WhatsApp integration via WPPConnect
+            - Real-time message sync
+            - Desktop notifications
+          files: |
+            ./shepherd-bridge-app/dist/${{ steps.find-exe.outputs.EXE_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rename asset
+        if: success()
+        run: |
+          echo "Release created successfully!"
+          echo "Download will be available as the .exe file uploaded"
