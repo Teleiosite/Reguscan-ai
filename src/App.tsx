@@ -10,6 +10,7 @@ import { ReguScanLanding } from './components/ReguScanLanding';
 import { IntelligentAuthPortal } from './components/IntelligentAuthPortal';
 import { ApplicantDashboard } from './components/ApplicantDashboard';
 import { AuditTrailModal } from './components/AuditTrailModal';
+import { AiKeyModal } from './components/AiKeyModal';
 import {
   ShieldCheck,
   Building2,
@@ -19,7 +20,8 @@ import {
   UserCheck,
   Award,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Key
 } from 'lucide-react';
 
 export function App() {
@@ -34,6 +36,7 @@ export function App() {
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | 'ALL'>('ALL');
   const [isAuditTrailOpen, setIsAuditTrailOpen] = useState(false);
+  const [isAiKeyModalOpen, setIsAiKeyModalOpen] = useState(false);
 
   // Load dossiers from Supabase or local cache on mount
   useEffect(() => {
@@ -179,6 +182,15 @@ export function App() {
             )}
 
             <button
+              onClick={() => setIsAiKeyModalOpen(true)}
+              className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition"
+              title="Configure Google Gemini API Key"
+            >
+              <Sparkles size={13} className="text-blue-400" />
+              <span className="hidden sm:inline">AI Engine</span>
+            </button>
+
+            <button
               onClick={() => setViewMode('LANDING')}
               className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700 hidden md:block transition"
             >
@@ -249,6 +261,11 @@ export function App() {
       {/* Audit Trail Modal (for NAFDAC compliance) */}
       {isAuditTrailOpen && (
         <AuditTrailModal onClose={() => setIsAuditTrailOpen(false)} />
+      )}
+
+      {/* AI Key Configuration Modal */}
+      {isAiKeyModalOpen && (
+        <AiKeyModal onClose={() => setIsAiKeyModalOpen(false)} />
       )}
 
       {/* Institutional Footer */}
