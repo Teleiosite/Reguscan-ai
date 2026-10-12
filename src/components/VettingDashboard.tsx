@@ -32,6 +32,7 @@ interface VettingDashboardProps {
   onChangeDirectorate: (dir: Directorate | 'ALL') => void;
   onOpenUploader?: () => void;
   onOpenAuditTrail?: () => void;
+  onSeedBenchmarks?: () => void;
 }
 
 export const VettingDashboard: React.FC<VettingDashboardProps> = ({
@@ -40,7 +41,8 @@ export const VettingDashboard: React.FC<VettingDashboardProps> = ({
   activeDirectorate,
   onChangeDirectorate,
   onOpenUploader,
-  onOpenAuditTrail
+  onOpenAuditTrail,
+  onSeedBenchmarks
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -267,8 +269,41 @@ export const VettingDashboard: React.FC<VettingDashboardProps> = ({
             <tbody className="divide-y divide-slate-100">
               {filteredDossiers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    No dossiers matching the selected criteria.
+                  <td colSpan={6} className="py-16 text-center">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
+                        <FolderOpen size={24} />
+                      </div>
+                      <div className="text-sm font-bold text-slate-800">
+                        {dossiers.length === 0 ? 'NAFDAC Vetting Intake Queue is Clean' : 'No dossiers matching the active criteria'}
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {dossiers.length === 0
+                          ? 'New product submissions filed by licensed pharmaceutical and food manufacturers will appear here in real time for AI parsing and regulatory verification.'
+                          : 'Try modifying your search keywords or directorate filter to locate matching dossiers.'}
+                      </p>
+                      {dossiers.length === 0 && (
+                        <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+                          {onOpenUploader && (
+                            <button
+                              onClick={onOpenUploader}
+                              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xs shadow-xs transition"
+                            >
+                              + Intake First Dossier
+                            </button>
+                          )}
+                          {onSeedBenchmarks && (
+                            <button
+                              onClick={onSeedBenchmarks}
+                              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg font-semibold text-xs transition flex items-center gap-1.5"
+                            >
+                              <Sparkles size={13} className="text-blue-600" />
+                              <span>Load 5 Benchmark Reference Cases</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ) : (

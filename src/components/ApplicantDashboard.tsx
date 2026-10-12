@@ -6,6 +6,7 @@ import {
   DIRECTORATE_LABELS,
   DossierDocument
 } from '../types';
+import { dossierService } from '../services/dossierService';
 import {
   Building2,
   PlusCircle,
@@ -49,17 +50,17 @@ export const ApplicantDashboard: React.FC<ApplicantDashboardProps> = ({
   const [selectedQueriedDossier, setSelectedQueriedDossier] = useState<RegulatoryDossier | null>(null);
   const [selectedCertificateDossier, setSelectedCertificateDossier] = useState<RegulatoryDossier | null>(null);
 
-  // Filter dossiers belonging to this applicant company
-  // (If demo user, we match by company name or applicantName)
+  // Filter dossiers strictly belonging to this applicant company
   const companyDossiers = dossiers.filter(d => {
     const isCompanyMatch =
+      d.applicantName.toLowerCase().trim() === currentUser.organizationName.toLowerCase().trim() ||
       d.applicantName.toLowerCase().includes(currentUser.organizationName.toLowerCase()) ||
       currentUser.organizationName.toLowerCase().includes(d.applicantName.toLowerCase());
     const matchesSearch =
       d.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.dossierNumber.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesDir = filterDirectorate === 'ALL' || d.directorate === filterDirectorate;
-    return (isCompanyMatch || dossiers.length <= 5) && matchesSearch && matchesDir;
+    return isCompanyMatch && matchesSearch && matchesDir;
   });
 
   // KPI counts
@@ -370,55 +371,54 @@ const ApplicantProductSubmissionModal: React.FC<ApplicantProductSubmissionModalP
     e.preventDefault();
     if (!productName) return;
 
+    if (uploadedFiles.length === 0) {
+      alert('Please upload at least one regulatory document (e.g. Certificate of Analysis, CAC Certificate, or GMP Report) to proceed.');
+      return;
+    }
+
     setIsSubmitting(true);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
 
     const randNum = Math.floor(100 + Math.random() * 900);
     const prefix = directorate === 'DRUG_RR' ? 'DR' : directorate === 'FOOD_RR' ? 'FD' : 'VBM';
     const dossierNumber = `NAF/${prefix}/2026/0${randNum}`;
 
-    const createdDocs: DossierDocument[] = uploadedFiles.map((f, i) => ({
-      id: `doc-${Date.now()}-${i}`,
-      name: f.name,
-      docType: f.name.toLowerCase().includes('coa') || f.name.toLowerCase().includes('analysis')
-        ? 'CERTIFICATE_OF_ANALYSIS'
-        : f.name.toLowerCase().includes('cac')
-        ? 'CAC_INCORPORATION'
-        : f.name.toLowerCase().includes('gmp')
-        ? 'GMP_AUDIT_REPORT'
-        : 'PRODUCT_LABEL_ARTWORK',
-      fileSize: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
-      uploadDate: new Date().toISOString(),
-      isMandatory: true,
-      status: 'VERIFIED',
-      extractedEntities: {
-        issuingAuthority: 'Accredited Quality Control Laboratory',
-        batchNumber: `BN-2026-X${Math.floor(10 + Math.random() * 90)}`,
-        issueDate: '2026-10-01',
-        expiryDate: '2029-09-30',
-        manufacturerName: currentUser.organizationName,
-        testedParameters: [
-          { parameter: 'Assay of Active Ingredient', result: '99.8%', specification: '95.0% – 105.0%', status: 'PASS' },
-          { parameter: 'Uniformity of Dosage Units', result: 'Conforms to BP', specification: 'BP 2024 Criteria', status: 'PASS' },
-          { parameter: 'Total Microbial Count', result: '< 10 CFU/g', specification: 'NMT 100 CFU/g', status: 'PASS' }
-        ]
+    // Upload files to Supabase Storage if configured
+    const createdDocs: DossierDocument[] = [];
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const f = uploadedFiles[i];
+      let storageUrl: string | undefined = undefined;
+      try {
+        const uploaded = await dossierService.uploadFileToStorage(f, `doc-${currentUser.id}`);
+        if (uploaded) storageUrl = uploaded;
+      } catch (err) {
+        console.warn('Storage upload notice:', err);
       }
-    }));
 
-    if (createdDocs.length === 0) {
       createdDocs.push({
-        id: `doc-default-coa`,
-        name: `Certificate_of_Analysis_${productName.replace(/\s+/g, '_')}.pdf`,
-        docType: 'CERTIFICATE_OF_ANALYSIS',
-        fileSize: '2.3 MB',
+        id: `doc-${Date.now()}-${i}`,
+        name: f.name,
+        docType: f.name.toLowerCase().includes('coa') || f.name.toLowerCase().includes('analysis')
+          ? 'CERTIFICATE_OF_ANALYSIS'
+          : f.name.toLowerCase().includes('cac')
+          ? 'CAC_INCORPORATION'
+          : f.name.toLowerCase().includes('gmp')
+          ? 'GMP_AUDIT_REPORT'
+          : 'PRODUCT_LABEL_ARTWORK',
+        fileSize: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
         uploadDate: new Date().toISOString(),
         isMandatory: true,
         status: 'VERIFIED',
         extractedEntities: {
-          issuingAuthority: 'Accredited QC Laboratory',
-          batchNumber: 'BN-QC-2026-09',
+          issuingAuthority: 'Accredited Analytical Laboratory',
+          batchNumber: `BN-2026-X${Math.floor(10 + Math.random() * 90)}`,
+          issueDate: new Date().toISOString().split('T')[0],
+          expiryDate: '2029-09-30',
+          manufacturerName: currentUser.organizationName,
+          fileUrl: storageUrl,
           testedParameters: [
-            { parameter: 'Finished Product Assay', result: '100.2%', specification: '95.0% – 105.0%', status: 'PASS' }
+            { parameter: 'Assay of Active Ingredient', result: '99.8%', specification: '95.0% – 105.0%', status: 'PASS' },
+            { parameter: 'Uniformity of Dosage Units', result: 'Conforms to BP', specification: 'BP 2024 Criteria', status: 'PASS' }
           ]
         }
       });

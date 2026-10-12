@@ -6,6 +6,7 @@ import { dossierService } from './services/dossierService';
 import { isSupabaseConfigured } from './services/supabase';
 import { VettingDashboard } from './components/VettingDashboard';
 import { DossierInspectionView } from './components/DossierInspectionView';
+import { DossierUploader } from './components/DossierUploader';
 import { ReguScanLanding } from './components/ReguScanLanding';
 import { IntelligentAuthPortal } from './components/IntelligentAuthPortal';
 import { ApplicantDashboard } from './components/ApplicantDashboard';
@@ -32,20 +33,24 @@ export function App() {
     return existing.role === 'NAFDAC_OFFICER' ? 'OFFICER_DASHBOARD' : 'APPLICANT_DASHBOARD';
   });
 
-  const [dossiers, setDossiers] = useState<RegulatoryDossier[]>(INITIAL_DOSSIERS);
+  const [dossiers, setDossiers] = useState<RegulatoryDossier[]>([]);
   const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | 'ALL'>('ALL');
   const [isAuditTrailOpen, setIsAuditTrailOpen] = useState(false);
   const [isAiKeyModalOpen, setIsAiKeyModalOpen] = useState(false);
+  const [isUploaderOpen, setIsUploaderOpen] = useState(false);
 
   // Load dossiers from Supabase or local cache on mount
   useEffect(() => {
     dossierService.fetchDossiers().then(fetched => {
-      if (fetched && fetched.length > 0) {
-        setDossiers(fetched);
-      }
+      setDossiers(fetched || []);
     });
   }, []);
+
+  const handleSeedBenchmarks = async () => {
+    const seeded = await dossierService.seedBenchmarkDossiers();
+    setDossiers(seeded);
+  };
 
   const selectedDossier = dossiers.find(d => d.id === selectedDossierId) || null;
 
@@ -232,8 +237,9 @@ export function App() {
             onSelectDossier={handleSelectDossier}
             activeDirectorate={activeDirectorate}
             onChangeDirectorate={setActiveDirectorate}
-            onOpenUploader={() => {}}
+            onOpenUploader={() => setIsUploaderOpen(true)}
             onOpenAuditTrail={() => setIsAuditTrailOpen(true)}
+            onSeedBenchmarks={handleSeedBenchmarks}
           />
         )}
 
@@ -257,6 +263,17 @@ export function App() {
           />
         )}
       </main>
+
+      {/* Officer Intake Modal */}
+      {isUploaderOpen && (
+        <DossierUploader
+          onAddDossier={(newD) => {
+            handleAddNewDossier(newD);
+            setIsUploaderOpen(false);
+          }}
+          onClose={() => setIsUploaderOpen(false)}
+        />
+      )}
 
       {/* Audit Trail Modal (for NAFDAC compliance) */}
       {isAuditTrailOpen && (

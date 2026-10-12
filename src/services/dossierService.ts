@@ -2,7 +2,7 @@ import { RegulatoryDossier, DossierDocument, ComplianceFlag } from '../types';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { INITIAL_DOSSIERS } from '../data/initialDossiers';
 
-const LOCAL_DOSSIERS_KEY = 'reguscan_dossiers_cache';
+const LOCAL_DOSSIERS_KEY = 'reguscan_dossiers_v2';
 
 export const dossierService = {
   // 1. Fetch all active regulatory dossiers
@@ -14,7 +14,11 @@ export const dossierService = {
           .select('*')
           .order('submission_date', { ascending: false });
 
-        if (!dError && dbDossiers && dbDossiers.length > 0) {
+        if (!dError && dbDossiers) {
+          if (dbDossiers.length === 0) {
+            return [];
+          }
+
           // Fetch associated documents and flags
           const { data: dbDocs } = await supabase.from('dossier_documents').select('*');
           const { data: dbFlags } = await supabase.from('compliance_flags').select('*');
@@ -71,11 +75,11 @@ export const dossierService = {
           return hydrated;
         }
       } catch (err) {
-        console.warn('Supabase fetch failed, utilizing cached/seed dossiers:', err);
+        console.warn('Supabase fetch failed:', err);
       }
     }
 
-    // Fallback: Local Cache or Initial Dossiers
+    // Fallback: Local Cache (only if offline or unconfigured)
     try {
       const cached = localStorage.getItem(LOCAL_DOSSIERS_KEY);
       if (cached) {
@@ -85,7 +89,29 @@ export const dossierService = {
       // ignore
     }
 
+    return [];
+  },
+
+  // Seed benchmark reference cases on-demand (e.g. for demonstration or testing)
+  seedBenchmarkDossiers: async (): Promise<RegulatoryDossier[]> => {
+    for (const d of INITIAL_DOSSIERS) {
+      await dossierService.saveDossier(d);
+    }
     return INITIAL_DOSSIERS;
+  },
+
+  // Clear all dossiers for a fresh slate
+  clearAllDossiers: async (): Promise<void> => {
+    localStorage.removeItem(LOCAL_DOSSIERS_KEY);
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('compliance_flags').delete().neq('id', 'placeholder');
+        await supabase.from('dossier_documents').delete().neq('id', 'placeholder');
+        await supabase.from('dossiers').delete().neq('id', 'placeholder');
+      } catch (err) {
+        console.warn('Failed to clear Supabase:', err);
+      }
+    }
   },
 
   // 2. Save a new dossier (from Applicant or Desk Registry)

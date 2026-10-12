@@ -58,6 +58,11 @@ export const DossierUploader: React.FC<DossierUploaderProps> = ({
       return;
     }
 
+    if (uploadedFiles.length === 0) {
+      alert('Please select and attach at least one official dossier document (e.g. Certificate of Analysis, CAC Certificate, or GMP Report).');
+      return;
+    }
+
     setIsProcessing(true);
 
     // Simulated 3-stage OCR & Vetting Engine
@@ -103,41 +108,6 @@ export const DossierUploader: React.FC<DossierUploaderProps> = ({
         rawTextExcerpt: `Verified electronic submission for ${productName}. Quality analysis passed all regulatory release specifications.`
       }
     }));
-
-    // If no files uploaded, add 2 sample files automatically
-    if (createdDocuments.length === 0) {
-      createdDocuments.push(
-        {
-          id: `doc-up-sample-1`,
-          name: `Certificate_of_Analysis_${productName.replace(/\s+/g, '_')}.pdf`,
-          docType: 'CERTIFICATE_OF_ANALYSIS',
-          fileSize: '2.1 MB',
-          uploadDate: new Date().toISOString(),
-          isMandatory: true,
-          status: 'VERIFIED',
-          extractedEntities: {
-            issuingAuthority: 'Accredited QC Analytical Laboratory',
-            batchNumber: 'BN-QC-2026-X1',
-            testedParameters: [
-              { parameter: 'Active Assay', result: '100.2%', specification: '95.0% – 105.0%', status: 'PASS' }
-            ]
-          }
-        },
-        {
-          id: `doc-up-sample-2`,
-          name: `CAC_Incorporation_${applicantName.replace(/\s+/g, '_')}.pdf`,
-          docType: 'CAC_INCORPORATION',
-          fileSize: '1.4 MB',
-          uploadDate: new Date().toISOString(),
-          isMandatory: true,
-          status: 'VERIFIED',
-          extractedEntities: {
-            issuingAuthority: 'Corporate Affairs Commission',
-            manufacturerName: applicantName
-          }
-        }
-      );
-    }
 
     const newDossier: RegulatoryDossier = {
       id: `dossier-${Date.now()}`,
