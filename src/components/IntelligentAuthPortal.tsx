@@ -156,7 +156,7 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Sign In (Staff or Applicant)
+              Sign In
             </button>
             <button
               type="button"
@@ -192,7 +192,7 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
                   <input
                     type="email"
                     required
-                    placeholder="e.g. officer@nafdac.gov.ng or regulatory@company.com"
+                    placeholder="e.g. regulatory@company.com"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     className="w-full pl-9 pr-4 py-2.5 border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-blue-600"
@@ -466,7 +466,7 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
                       <input
                         type="email"
                         required
-                        placeholder="e.g. officer@nafdac.gov.ng or regulatory@company.com"
+                        placeholder="e.g. regulatory@company.com"
                         value={forgotEmail}
                         onChange={e => setForgotEmail(e.target.value)}
                         className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-blue-600"
