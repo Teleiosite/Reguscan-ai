@@ -26,7 +26,8 @@ import {
   Sparkles,
   Download,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Printer
 } from 'lucide-react';
 
 interface ApplicantDashboardProps {
@@ -49,6 +50,7 @@ export const ApplicantDashboard: React.FC<ApplicantDashboardProps> = ({
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [selectedQueriedDossier, setSelectedQueriedDossier] = useState<RegulatoryDossier | null>(null);
   const [selectedCertificateDossier, setSelectedCertificateDossier] = useState<RegulatoryDossier | null>(null);
+  const [submissionReceiptDossier, setSubmissionReceiptDossier] = useState<RegulatoryDossier | null>(null);
 
   // Filter dossiers strictly belonging to this applicant company
   const companyDossiers = dossiers.filter(d => {
@@ -308,6 +310,7 @@ export const ApplicantDashboard: React.FC<ApplicantDashboardProps> = ({
           onSubmitSuccess={(newDossier) => {
             onAddNewDossier(newDossier);
             setIsSubmitModalOpen(false);
+            setSubmissionReceiptDossier(newDossier);
           }}
         />
       )}
@@ -329,6 +332,14 @@ export const ApplicantDashboard: React.FC<ApplicantDashboardProps> = ({
         <NafdacCertificateModal
           dossier={selectedCertificateDossier}
           onClose={() => setSelectedCertificateDossier(null)}
+        />
+      )}
+
+      {/* MODAL 4: OFFICIAL NAFDAC ELECTRONIC SUBMISSION ACKNOWLEDGEMENT SLIP */}
+      {submissionReceiptDossier && (
+        <SubmissionReceiptModal
+          dossier={submissionReceiptDossier}
+          onClose={() => setSubmissionReceiptDossier(null)}
         />
       )}
     </div>
@@ -805,6 +816,196 @@ const NafdacCertificateModal: React.FC<NafdacCertificateModalProps> = ({ dossier
             className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold"
           >
             Close Certificate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// SUB-COMPONENT: OFFICIAL NAFDAC ELECTRONIC SUBMISSION ACKNOWLEDGEMENT SLIP MODAL
+interface SubmissionReceiptModalProps {
+  dossier: RegulatoryDossier;
+  onClose: () => void;
+}
+
+const SubmissionReceiptModal: React.FC<SubmissionReceiptModalProps> = ({ dossier, onClose }) => {
+  const dirInfo = DIRECTORATE_LABELS[dossier.directorate];
+  const submissionTime = new Date(dossier.submissionDate).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const trackingHash = `sha256:${dossier.id.replace(/[^a-zA-Z0-9]/g, '')}094e${Date.now().toString(16)}`;
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl max-w-xl w-full border border-slate-300 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95 duration-200">
+        {/* Modal Top Bar */}
+        <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 print:hidden">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={18} className="text-emerald-400" />
+            <span className="text-xs font-bold uppercase tracking-wider">
+              NAFDAC E-Filing Acknowledgement Slip
+            </span>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition">✕</button>
+        </div>
+
+        {/* Printable Official Slip Content */}
+        <div className="p-6 sm:p-8 overflow-y-auto space-y-6 font-sans text-slate-800 bg-white">
+          {/* Institutional Crest & Header */}
+          <div className="text-center border-b border-slate-200 pb-5">
+            <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 text-white flex items-center justify-center font-black text-xl mx-auto shadow-sm mb-2">
+              R
+            </div>
+            <div className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">
+              Federal Republic of Nigeria
+            </div>
+            <h2 className="text-sm sm:text-base font-black text-slate-900 uppercase tracking-tight mt-0.5">
+              National Agency for Food & Drug Administration and Control
+            </h2>
+            <div className="text-[11px] font-bold text-blue-700 mt-1 uppercase tracking-wide">
+              Electronic Regulatory Dossier Intake Confirmation Slip
+            </div>
+          </div>
+
+          {/* Prominent Success Badge */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold mb-1">
+              <CheckCircle2 size={14} className="text-emerald-600" />
+              <span>SUBMISSION SUCCESSFUL & REGISTERED</span>
+            </div>
+            <p className="text-xs text-emerald-950 font-medium">
+              Your product dossier has been successfully transferred to the NAFDAC Technical Vetting Station for OCR document parsing and AI compliance verification.
+            </p>
+          </div>
+
+          {/* Dossier Reference Highlight */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono">
+            <div>
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                Official Dossier Reference
+              </div>
+              <div className="text-lg font-black text-blue-700">
+                {dossier.dossierNumber}
+              </div>
+            </div>
+            <div className="sm:text-right">
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                Target Directorate
+              </div>
+              <div className="text-xs font-bold text-slate-800">
+                {dirInfo.code} — {dirInfo.name}
+              </div>
+            </div>
+          </div>
+
+          {/* Submission Particulars Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div className="p-3 bg-slate-50/70 border border-slate-200 rounded-lg">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                Product Formulation
+              </span>
+              <span className="font-bold text-slate-900 block truncate">
+                {dossier.productName}
+              </span>
+              <span className="text-[11px] text-slate-500 block truncate">
+                {dossier.genericName || dossier.dosageForm}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50/70 border border-slate-200 rounded-lg">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                Filing Entity & CAC RC No.
+              </span>
+              <span className="font-bold text-slate-900 block truncate">
+                {dossier.applicantName}
+              </span>
+              <span className="text-[11px] text-slate-500 block">
+                RC Number: {dossier.applicantRcNumber}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50/70 border border-slate-200 rounded-lg">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                Filing Timestamp
+              </span>
+              <span className="font-bold text-slate-900 block">
+                {submissionTime}
+              </span>
+              <span className="text-[10px] text-slate-500 block">
+                Standard Statutory Intake Window
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50/70 border border-slate-200 rounded-lg">
+              <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                Verified Electronic Files
+              </span>
+              <span className="font-bold text-slate-900 block">
+                {dossier.documents.length} Encrypted Regulatory Document{dossier.documents.length > 1 ? 's' : ''}
+              </span>
+              <span className="text-[10px] text-emerald-700 font-semibold block">
+                Uploaded to NAFDAC Storage Vault
+              </span>
+            </div>
+          </div>
+
+          {/* Attached Files List */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1.5">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+              Dossier File Inventory:
+            </span>
+            {dossier.documents.map((doc, idx) => (
+              <div key={doc.id || idx} className="flex items-center justify-between text-[11px] text-slate-700">
+                <span className="truncate max-w-[320px] font-medium">• {doc.name}</span>
+                <span className="text-[10px] text-slate-400 font-mono">{doc.fileSize}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Cryptographic Audit Seal & QR Simulation */}
+          <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-slate-500 text-[10px]">
+            <div className="space-y-1 text-center sm:text-left">
+              <div className="font-bold text-slate-700 flex items-center justify-center sm:justify-start gap-1">
+                <ShieldCheck size={12} className="text-blue-600" />
+                <span>Statutory E-Filing Integrity Seal (NDPA 2023)</span>
+              </div>
+              <div className="font-mono text-slate-400 truncate max-w-sm">
+                {trackingHash}
+              </div>
+            </div>
+
+            {/* Visual Simulated QR / Verification Badge */}
+            <div className="px-3 py-1.5 rounded-lg border border-slate-300 bg-slate-100/80 text-center font-mono text-[9px] text-slate-600 font-bold tracking-tight">
+              NAFDAC E-INTAKE VERIFIED
+              <div className="text-[8px] text-slate-400 font-normal">PORTAL REGUSCAN-AI</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Action Controls */}
+        <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 print:hidden">
+          <button
+            onClick={handlePrint}
+            className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs flex items-center gap-1.5 shadow-xs transition"
+          >
+            <Printer size={15} />
+            <span>Print Official Slip</span>
+          </button>
+
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition"
+          >
+            Proceed to Portfolio Dashboard &rarr;
           </button>
         </div>
       </div>

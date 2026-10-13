@@ -12,7 +12,9 @@ import {
   ArrowLeft,
   UserCheck,
   FileText,
-  BadgeCheck
+  BadgeCheck,
+  KeyRound,
+  X
 } from 'lucide-react';
 
 interface IntelligentAuthPortalProps {
@@ -31,6 +33,14 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
   const [rcNumber, setRcNumber] = useState('');
   const [superintendentName, setSuperintendentName] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Forgot password state
+  const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotStatus, setForgotStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message: string }>({
+    type: 'idle',
+    message: ''
+  });
 
   // Live intelligent role detection
   const detectedRole: UserRole = authService.detectRoleFromEmail(email || 'placeholder');
@@ -74,6 +84,26 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Company registration failed.');
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail || !forgotEmail.includes('@')) {
+      setForgotStatus({ type: 'error', message: 'Please enter a valid official email address.' });
+      return;
+    }
+
+    setForgotStatus({ type: 'loading', message: 'Verifying institutional account & dispatching reset instructions...' });
+    try {
+      const res = await authService.resetPassword(forgotEmail);
+      if (res.success) {
+        setForgotStatus({ type: 'success', message: res.message });
+      } else {
+        setForgotStatus({ type: 'error', message: res.message });
+      }
+    } catch (err: any) {
+      setForgotStatus({ type: 'error', message: err.message || 'Failed to dispatch reset instructions.' });
     }
   };
 
@@ -202,6 +232,19 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
                     onChange={e => setPassword(e.target.value)}
                     className="w-full pl-9 pr-4 py-2.5 border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:border-blue-600"
                   />
+                </div>
+                <div className="flex justify-end mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotEmail(email);
+                      setForgotStatus({ type: 'idle', message: '' });
+                      setIsForgotModalOpen(true);
+                    }}
+                    className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 transition"
+                  >
+                    Forgot Password?
+                  </button>
                 </div>
               </div>
 
@@ -356,6 +399,107 @@ export const IntelligentAuthPortal: React.FC<IntelligentAuthPortalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {isForgotModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-300 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <KeyRound size={18} className="text-blue-400" />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  NAFDAC Portal Credential Recovery
+                </span>
+              </div>
+              <button
+                onClick={() => setIsForgotModalOpen(false)}
+                className="text-slate-400 hover:text-white transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="text-center">
+                <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto text-blue-600 mb-2">
+                  <KeyRound size={22} />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Forgot Your Portal Password?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Enter your registered corporate or official NAFDAC email address. We will dispatch secure password reset instructions via Supabase Auth.
+                </p>
+              </div>
+
+              {forgotStatus.type === 'success' ? (
+                <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs space-y-2">
+                  <div className="flex items-center gap-2 font-bold text-emerald-800">
+                    <CheckCircle2 size={16} className="text-emerald-600" />
+                    <span>Recovery Dispatch Sent</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    {forgotStatus.message}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsForgotModalOpen(false)}
+                    className="w-full mt-2 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition"
+                  >
+                    Return to Sign In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                  {forgotStatus.type === 'error' && (
+                    <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs">
+                      {forgotStatus.message}
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                      Official Registered Email *
+                    </label>
+                    <div className="relative">
+                      <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="email"
+                        required
+                        placeholder="e.g. officer@nafdac.gov.ng or regulatory@company.com"
+                        value={forgotEmail}
+                        onChange={e => setForgotEmail(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-blue-600"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsForgotModalOpen(false)}
+                      className="flex-1 py-2 px-3 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg text-xs font-semibold transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotStatus.type === 'loading'}
+                      className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+                    >
+                      {forgotStatus.type === 'loading' ? (
+                        <span>Dispatching...</span>
+                      ) : (
+                        <span>Send Recovery Link</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

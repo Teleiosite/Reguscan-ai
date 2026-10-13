@@ -191,8 +191,8 @@ export function App() {
               className="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center gap-1.5 transition"
               title="Configure Google Gemini API Key"
             >
-              <Sparkles size={13} className="text-blue-400" />
-              <span className="hidden sm:inline">AI Engine</span>
+              <Key size={13} className="text-amber-400" />
+              <span className="hidden sm:inline">Settings & AI Keys</span>
             </button>
 
             <button
@@ -240,6 +240,7 @@ export function App() {
             onOpenUploader={() => setIsUploaderOpen(true)}
             onOpenAuditTrail={() => setIsAuditTrailOpen(true)}
             onSeedBenchmarks={handleSeedBenchmarks}
+            onOpenAiSettings={() => setIsAiKeyModalOpen(true)}
           />
         )}
 

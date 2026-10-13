@@ -22,7 +22,8 @@ import {
   RefreshCw,
   FolderOpen,
   UploadCloud,
-  ShieldCheck
+  ShieldCheck,
+  Key
 } from 'lucide-react';
 
 interface VettingDashboardProps {
@@ -33,6 +34,7 @@ interface VettingDashboardProps {
   onOpenUploader?: () => void;
   onOpenAuditTrail?: () => void;
   onSeedBenchmarks?: () => void;
+  onOpenAiSettings?: () => void;
 }
 
 export const VettingDashboard: React.FC<VettingDashboardProps> = ({
@@ -42,7 +44,8 @@ export const VettingDashboard: React.FC<VettingDashboardProps> = ({
   onChangeDirectorate,
   onOpenUploader,
   onOpenAuditTrail,
-  onSeedBenchmarks
+  onSeedBenchmarks,
+  onOpenAiSettings
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -101,6 +104,17 @@ export const VettingDashboard: React.FC<VettingDashboardProps> = ({
             >
               <ShieldCheck size={16} className="text-emerald-400" />
               <span>NDPA 2023 Audit Trail</span>
+            </button>
+          )}
+
+          {onOpenAiSettings && (
+            <button
+              onClick={onOpenAiSettings}
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-2 transition"
+              title="Configure Google Gemini AI API Key (System or Officer Key)"
+            >
+              <Key size={16} className="text-amber-400" />
+              <span>Settings & AI Keys</span>
             </button>
           )}
 

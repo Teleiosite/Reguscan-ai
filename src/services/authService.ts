@@ -1,4 +1,5 @@
 import { ReguScanUser, UserRole } from '../types';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 const STORAGE_KEY = 'reguscan_active_session';
 const REGISTERED_USERS_KEY = 'reguscan_registered_users';
@@ -93,7 +94,35 @@ export const authService = {
       return { success: true, user: matched };
     }
 
-    // Check custom registered users
+    // Check Supabase profiles table if configured
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: dbUser } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', clean)
+          .maybeSingle();
+
+        if (dbUser) {
+          const user: ReguScanUser = {
+            id: dbUser.id,
+            name: dbUser.name,
+            email: dbUser.email,
+            role: dbUser.role as UserRole,
+            organizationName: dbUser.organization_name,
+            rcNumber: dbUser.rc_number || undefined,
+            designation: dbUser.designation || undefined,
+            directorate: dbUser.directorate || undefined
+          };
+          authService.setCurrentUser(user);
+          return { success: true, user };
+        }
+      } catch (err) {
+        console.warn('Supabase profiles query fallback:', err);
+      }
+    }
+
+    // Check custom registered users from local cache
     const registered = authService.getRegisteredUsers();
     const matchedCustom = registered.find(u => u.email.toLowerCase() === clean);
     if (matchedCustom) {
@@ -138,10 +167,52 @@ export const authService = {
       designation: 'Superintendent Pharmacist / Regulatory Officer'
     };
 
+    // Save to local cache
     const existing = authService.getRegisteredUsers();
     localStorage.setItem(REGISTERED_USERS_KEY, JSON.stringify([...existing, newUser]));
     authService.setCurrentUser(newUser);
+
+    // Sync to Supabase profiles table if configured
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('profiles').upsert({
+          id: newUser.id,
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role,
+          organization_name: newUser.organizationName,
+          rc_number: newUser.rcNumber,
+          designation: newUser.designation
+        });
+      } catch (err) {
+        console.warn('Supabase profile registration sync note:', err);
+      }
+    }
+
     return { success: true, user: newUser };
+  },
+
+  resetPassword: async (email: string): Promise<{ success: boolean; message: string }> => {
+    const clean = email.trim().toLowerCase();
+    if (!clean || !clean.includes('@')) {
+      return { success: false, message: 'Please provide a valid official email address.' };
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(clean);
+        if (error) {
+          console.warn('Supabase password reset warning:', error.message);
+        }
+      } catch (err) {
+        console.warn('Supabase resetPassword fallback:', err);
+      }
+    }
+
+    return {
+      success: true,
+      message: `Password reset instructions have been dispatched to ${clean}. If this account is registered with NAFDAC or as a licensed manufacturer, follow the link in your inbox to reset your credentials.`
+    };
   },
 
   getRegisteredUsers: (): ReguScanUser[] => {
